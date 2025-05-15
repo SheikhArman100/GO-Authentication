@@ -3,8 +3,8 @@ package database
 import (
 	"fmt"
 	"log"
-	"os"
 	"my-project/internal/model"
+	"os"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/joho/godotenv/autoload"
@@ -34,11 +34,11 @@ type service struct {
 }
 
 var (
-	dbname     = os.Getenv("BLUEPRINT_DB_DATABASE")
-	password   = os.Getenv("BLUEPRINT_DB_PASSWORD")
-	username   = os.Getenv("BLUEPRINT_DB_USERNAME")
-	port       = os.Getenv("BLUEPRINT_DB_PORT")
-	host       = os.Getenv("BLUEPRINT_DB_HOST")
+	dbname     = os.Getenv("DB_DATABASE")
+	password   = os.Getenv("DB_PASSWORD")
+	username   = os.Getenv("DB_USERNAME")
+	port       = os.Getenv("DB_PORT")
+	host       = os.Getenv("DB_HOST")
 	dbInstance *service
 )
 
@@ -57,7 +57,7 @@ func New() Service {
 	}
 
 	// Auto Migrate the schema
-	if err := db.AutoMigrate(&model.User{},&model.UserDetail{},&model.RefreshToken{},&model.Image{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.UserDetail{}, &model.RefreshToken{}, &model.Image{}); err != nil {
 		log.Fatal("Failed to migrate database schema:", err)
 	}
 

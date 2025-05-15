@@ -1,10 +1,14 @@
 package server
 
 import (
-	"net/http"
 	"my-project/internal/handler"
+	"my-project/internal/middleware"
+	"my-project/internal/validation"
+	"net/http"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
 
 
@@ -35,7 +39,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 		auth := v1.Group("/auth")
 		{
 			auth.GET("/", authHandler.HelloAuth)
-			auth.POST("/signup", authHandler.SignUp)
+			auth.POST("/signup", middleware.ValidateRequest(&validation.SignUpRequest{}, validator.New()), authHandler.SignUp)
 			auth.POST("/signin", authHandler.SignIn)
 		}
 
