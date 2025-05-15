@@ -36,7 +36,8 @@ tmp_dir = "tmp"
 
 [log]
   main_only = false
-  time = false
+  time = true
+  level = "debug"
 
 [misc]
   clean_on_exit = false

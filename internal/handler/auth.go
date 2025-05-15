@@ -127,6 +127,48 @@ func (h *AuthHandler) SignUp(c *gin.Context) {
 	}, nil)
 }
 
+// VerifyEmail handles email verification
+func (h *AuthHandler) VerifyEmail(c *gin.Context) {
+	token := c.Param("token")
+
+	if token == "" {
+		response.ApiError(c, http.StatusBadRequest, "Verification token is required")
+		return
+	}
+
+	// Parse and validate the token
+	claims := jwt.MapClaims{}
+	t, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_VERIFY_EMAIL_SECRET")), nil
+	})
+	if err != nil || !t.Valid {
+
+		response.ApiError(c, http.StatusBadRequest, "Invalid or expired verification token")
+		return
+	}
+
+	// Extract user ID from the token
+	idFloat, ok := claims["id"].(float64)
+	if !ok {
+		response.ApiError(c, http.StatusBadRequest, "Invalid token payload")
+		return
+	}
+	userID := uint(idFloat)
+	
+
+	// Update user's email_verified_at field
+	if err := h.db.DB().Model(&model.User{}).Where("id = ?", uint(userID)).Update("is_verified", true).Error; err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to verify email", err.Error())
+		return
+	}
+	// Send success response
+	response.SendResponse(c, http.StatusOK, true, "Email verified successfully", struct {
+		ID uint `json:"id"`
+	}{
+		ID: userID,
+	}, nil)
+}
+
 // SignIn handles user authentication
 func (h *AuthHandler) SignIn(c *gin.Context) {
 	var req SignInRequest

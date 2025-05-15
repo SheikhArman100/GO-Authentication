@@ -11,9 +11,6 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-
-
-
 func (s *Server) RegisterRoutes() http.Handler {
 	r := gin.Default()
 
@@ -32,7 +29,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	v1 := r.Group("/api/v1")
 	{
 		// Initialize handlers
-		authHandler := handler.NewAuthHandler(s.db) 
+		authHandler := handler.NewAuthHandler(s.db)
 		userHandler := handler.NewUserHandler(s.db)
 
 		// Auth routes
@@ -40,6 +37,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 		{
 			auth.GET("/", authHandler.HelloAuth)
 			auth.POST("/signup", middleware.ValidateRequest(&validation.SignUpRequest{}, validator.New()), authHandler.SignUp)
+			auth.PUT("/verify-email/:token", authHandler.VerifyEmail)
 			auth.POST("/signin", authHandler.SignIn)
 		}
 
@@ -52,7 +50,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	//This route will catch the error if user hits a route that does not exist in our api.
 	r.NoRoute(noRouteHandler)
-	
+
 	return r
 }
 
@@ -69,4 +67,3 @@ func (s *Server) healthHandler(c *gin.Context) {
 func noRouteHandler(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"message": "Api not found!!! Wrong url, there is no route in this url."})
 }
-
