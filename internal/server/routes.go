@@ -38,7 +38,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 			auth.GET("/", authHandler.HelloAuth)
 			auth.POST("/signup", middleware.ValidateRequest(&validation.SignUpRequest{}, validator.New()), authHandler.SignUp)
 			auth.PUT("/verify-email/:token", authHandler.VerifyEmail)
-			auth.POST("/signin", authHandler.SignIn)
+			auth.POST("/signin",middleware.ValidateRequest(&validation.SignInRequest{},validator.New()), authHandler.SignIn)
 		}
 
 		// User routes

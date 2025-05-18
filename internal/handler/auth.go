@@ -19,11 +19,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type SignInRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
-}
-
 type AuthHandler struct {
 	db database.Service
 }
@@ -154,7 +149,6 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 		return
 	}
 	userID := uint(idFloat)
-	
 
 	// Update user's email_verified_at field
 	if err := h.db.DB().Model(&model.User{}).Where("id = ?", uint(userID)).Update("is_verified", true).Error; err != nil {
@@ -171,21 +165,91 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 
 // SignIn handles user authentication
 func (h *AuthHandler) SignIn(c *gin.Context) {
-	var req SignInRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// Get validated schema from context
+	validated, exists := c.Get("validated")
+	if !exists {
+		response.ApiError(c, http.StatusInternalServerError, "Validation data missing")
+		return
+	}
+	req, ok := validated.(*validation.SignInRequest)
+	if !ok {
+		response.ApiError(c, http.StatusInternalServerError, "Invalid validation data")
 		return
 	}
 
-	// Create a new user
-	user := &model.User{
-		Email:    req.Email,
-		Password: req.Password,
+	// Find user in database
+	var user model.User
+	if err := h.db.DB().Where("email =?", req.Email).First(&user).Error; err != nil {
+		response.ApiError(c, http.StatusNotFound, "User doesn't exist.")
+		return
+	}
+	//check user is verified or not
+	if user.IsVerified == false {
+		response.ApiError(c, http.StatusForbidden, "Please verify your email before signing in.")
+		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "User signed in successfully",
-		"email":   user.Email,
-	})
+	// Verify password using bcrypt
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		response.ApiError(c, http.StatusUnauthorized, "Password is incorrect.")
+		return
+	}
+
+	// Generate Access Token
+	accessExpiresInStr := os.Getenv("JWT_ACCESS_TOKEN_EXPIRES_IN")
+	accessExpiresIn, err := strconv.ParseInt(accessExpiresInStr, 10, 64)
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Invalid JWT_ACCESS_TOKEN_EXPIRES_IN value", err.Error())
+		return
+	}
+
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    user.ID,
+		"email": user.Email,
+		"role":  user.Role,
+		"exp":   time.Now().Add(time.Second * time.Duration(accessExpiresIn)).Unix(),
+	}).SignedString([]byte(os.Getenv("JWT_ACCESS_TOKEN_SECRET")))
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to generate access token", err.Error())
+		return
+	}
+
+	// Generate Refresh Token
+	refreshExpiresInStr := os.Getenv("JWT_REFRESH_TOKEN_EXPIRES_IN")
+	refreshExpiresIn, err := strconv.ParseInt(refreshExpiresInStr, 10, 64)
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Invalid JWT_REFRESH_TOKEN_EXPIRES_IN value", err.Error())
+		return
+	}
+	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    user.ID,
+		"email": user.Email,
+		"role":  user.Role,
+		"exp":   time.Now().Add(time.Second * time.Duration(refreshExpiresIn)).Unix(),
+	}).SignedString([]byte(os.Getenv("JWT_REFRESH_TOKEN_SECRET")))
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to generate refresh token", err.Error())
+		return
+	}
+
+	// Create a new refresh token record
+	refreshTokenRecord := &model.RefreshToken{
+		Token:     refreshToken,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(time.Second * time.Duration(refreshExpiresIn)),
+	}
+
+	// Save refresh token to database
+	if err := h.db.DB().Create(refreshTokenRecord).Error; err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to save refresh token", err.Error())
+		return
+	}
+
+	// Set refresh token in cookies
+	c.SetCookie("GO_JWT", refreshToken, int(refreshExpiresIn), "/", "", false, true)
+
+	// Send success response with tokens
+	response.SendResponse(c, http.StatusOK, true, "Sign in successful", gin.H{
+		"access_token": accessToken,
+	}, nil)
 }
