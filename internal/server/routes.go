@@ -50,6 +50,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 			auth.GET("/update-token", authHandler.UpdateToken)
 			//sign out route
 			auth.POST("/signout", authHandler.SignOut)
+			//user details from token
+			auth.GET("/user", authHandler.UserDetails)	
 		}
 
 		// User routes

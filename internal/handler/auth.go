@@ -378,9 +378,42 @@ func (h *AuthHandler) SignOut(c *gin.Context) {
 
 	// Clear the refresh token cookie
 	c.SetCookie("GO_JWT", "", -1, "/", "", false, true)
+	fmt.Println("Sign out successful")
 
 	// Send success response
 	response.SendResponse(c, http.StatusOK, true, "Sign out successful", gin.H{
 		"user_id": userID,
+	}, nil)
+}
+//user details from refresh token
+func (h *AuthHandler) UserDetails(c *gin.Context) {
+	// Get refresh token from cookies
+	refreshToken, err := c.Cookie("GO_JWT")
+	if err!= nil {
+		response.ApiError(c, http.StatusUnauthorized, "Please sign in first")
+		return
+	}
+
+	// Verify refresh token
+	claims := jwt.MapClaims{}
+	t, err := jwt.ParseWithClaims(refreshToken, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_REFRESH_TOKEN_SECRET")), nil
+
+	})
+	if err!= nil ||!t.Valid {
+		response.ApiError(c, http.StatusBadRequest, "Invalid or expired refresh token")
+		return
+	}
+	
+	//extract user id,role,email from claims
+	userID := uint(claims["id"].(float64))
+	role := claims["role"].(string)
+	email := claims["email"].(string)
+
+	//send success response
+	response.SendResponse(c, http.StatusOK, true, "User details", gin.H{
+		"user_id": userID,
+		"role":    role,
+		"email":   email,
 	}, nil)
 }
