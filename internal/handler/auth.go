@@ -115,10 +115,8 @@ func (h *AuthHandler) SignUp(c *gin.Context) {
 	}
 
 	// Send success response
-	response.SendResponse(c, http.StatusCreated, true, "User registered successfully", struct {
-		ID uint `json:"id"`
-	}{
-		ID: user.ID,
+	response.SendResponse(c, http.StatusCreated, true, "User registered successfully", gin.H{
+		"user_id": user.ID,
 	}, nil)
 }
 
@@ -156,10 +154,8 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 		return
 	}
 	// Send success response
-	response.SendResponse(c, http.StatusOK, true, "Email verified successfully", struct {
-		ID uint `json:"id"`
-	}{
-		ID: userID,
+	response.SendResponse(c, http.StatusOK, true, "Email verified successfully", gin.H{
+		"user_id": userID,
 	}, nil)
 }
 
@@ -282,9 +278,9 @@ func (h *AuthHandler) UpdateToken(c *gin.Context) {
 	}
 	userID := uint(idFloat)
 
-	// Check if the refresh token exists in the database
+	// Check if the refresh token exists and belongs to the user
 	var refreshTokenRecord model.RefreshToken
-	if err := h.db.DB().Where("token =?", refreshToken).First(&refreshTokenRecord).Error; err != nil {
+	if err := h.db.DB().Where("token = ? AND user_id = ?", refreshToken, userID).First(&refreshTokenRecord).Error; err != nil {
 		response.ApiError(c, http.StatusBadRequest, "Invalid or expired refresh token")
 		return
 	}
@@ -344,4 +340,47 @@ func (h *AuthHandler) UpdateToken(c *gin.Context) {
 		"access_token": accessToken,
 	}, nil)
 
+}
+
+// signout
+func (h *AuthHandler) SignOut(c *gin.Context) {
+	// Get refresh token from cookies
+	refreshToken, err := c.Cookie("GO_JWT")
+	if err != nil {
+		response.ApiError(c, http.StatusUnauthorized, "Please sign in first")
+		return
+	}
+
+	// Verify refresh token
+	claims := jwt.MapClaims{}
+	t, err := jwt.ParseWithClaims(refreshToken, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_REFRESH_TOKEN_SECRET")), nil
+
+	})
+	if err != nil || !t.Valid {
+		response.ApiError(c, http.StatusBadRequest, "Invalid or expired refresh token")
+		return
+	}
+
+	// Extract user ID from the token
+	idFloat, ok := claims["id"].(float64)
+	if !ok {
+		response.ApiError(c, http.StatusBadRequest, "Invalid token payload")
+		return
+	}
+	userID := uint(idFloat)
+
+	// Delete the specific refresh token for this user from the database
+	if err := h.db.DB().Where("token = ? AND user_id = ?", refreshToken, userID).Delete(&model.RefreshToken{}).Error; err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to sign out", err.Error())
+		return
+	}
+
+	// Clear the refresh token cookie
+	c.SetCookie("GO_JWT", "", -1, "/", "", false, true)
+
+	// Send success response
+	response.SendResponse(c, http.StatusOK, true, "Sign out successful", gin.H{
+		"user_id": userID,
+	}, nil)
 }

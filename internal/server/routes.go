@@ -48,6 +48,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 			auth.POST("/signin", middleware.ValidateRequest(&validation.SignInRequest{}, validator.New()), authHandler.SignIn)
 			//update token route
 			auth.GET("/update-token", authHandler.UpdateToken)
+			//sign out route
+			auth.POST("/signout", authHandler.SignOut)
 		}
 
 		// User routes
