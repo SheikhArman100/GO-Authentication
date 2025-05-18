@@ -15,8 +15,9 @@ type UserDetail struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relations
-	User  User   `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE" json:"user,omitempty"`
-	Image *Image `gorm:"foreignKey:UserDetailID;constraint:OnDelete:CASCADE" json:"image,omitempty"`
+	User          User           `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE" json:"user,omitempty"`
+	Image         *Image         `gorm:"foreignKey:UserDetailID;constraint:OnDelete:CASCADE" json:"image,omitempty"`
+	SocialProfile *SocialProfile `gorm:"foreignKey:UserDetailID;constraint:OnDelete:CASCADE" json:"social_profile,omitempty"`
 }
 
 // TableName overrides the table name for UserDetail
