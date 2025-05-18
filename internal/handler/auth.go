@@ -253,3 +253,95 @@ func (h *AuthHandler) SignIn(c *gin.Context) {
 		"access_token": accessToken,
 	}, nil)
 }
+
+// update token
+func (h *AuthHandler) UpdateToken(c *gin.Context) {
+	// Get refresh token from cookies
+	refreshToken, err := c.Cookie("GO_JWT")
+	if err != nil {
+		response.ApiError(c, http.StatusUnauthorized, "Please sign in first")
+		return
+	}
+
+	// Verify refresh token
+	claims := jwt.MapClaims{}
+	t, err := jwt.ParseWithClaims(refreshToken, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_REFRESH_TOKEN_SECRET")), nil
+
+	})
+	if err != nil || !t.Valid {
+		response.ApiError(c, http.StatusBadRequest, "Invalid or expired refresh token")
+		return
+	}
+
+	// Extract user ID from the token
+	idFloat, ok := claims["id"].(float64)
+	if !ok {
+		response.ApiError(c, http.StatusBadRequest, "Invalid token payload")
+		return
+	}
+	userID := uint(idFloat)
+
+	// Check if the refresh token exists in the database
+	var refreshTokenRecord model.RefreshToken
+	if err := h.db.DB().Where("token =?", refreshToken).First(&refreshTokenRecord).Error; err != nil {
+		response.ApiError(c, http.StatusBadRequest, "Invalid or expired refresh token")
+		return
+	}
+
+	// Check if the refresh token is valid
+	if refreshTokenRecord.ExpiresAt.Before(time.Now()) {
+		response.ApiError(c, http.StatusBadRequest, "Invalid or expired refresh token")
+		return
+	}
+	// Generate new access token
+	accessExpiresInStr := os.Getenv("JWT_ACCESS_TOKEN_EXPIRES_IN")
+	accessExpiresIn, err := strconv.ParseInt(accessExpiresInStr, 10, 64)
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Invalid JWT_ACCESS_TOKEN_EXPIRES_IN value", err.Error())
+		return
+	}
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    userID,
+		"email": claims["email"],
+		"role":  claims["role"],
+		"exp":   time.Now().Add(time.Second * time.Duration(accessExpiresIn)).Unix(),
+	}).SignedString([]byte(os.Getenv("JWT_ACCESS_TOKEN_SECRET")))
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to generate access token", err.Error())
+		return
+	}
+
+	//generate new refresh token
+	refreshExpiresInStr := os.Getenv("JWT_REFRESH_TOKEN_EXPIRES_IN")
+	refreshExpiresIn, err := strconv.ParseInt(refreshExpiresInStr, 10, 64)
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Invalid JWT_REFRESH_TOKEN_EXPIRES_IN value", err.Error())
+		return
+	}
+	refreshToken, err = jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    userID,
+		"email": claims["email"],
+		"role":  claims["role"],
+		"exp":   time.Now().Add(time.Second * time.Duration(refreshExpiresIn)).Unix(),
+	}).SignedString([]byte(os.Getenv("JWT_REFRESH_TOKEN_SECRET")))
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to generate refresh token", err.Error())
+		return
+	}
+	// Update the refresh token in the database
+	refreshTokenRecord.Token = refreshToken
+	refreshTokenRecord.ExpiresAt = time.Now().Add(time.Second * time.Duration(refreshExpiresIn))
+	if err := h.db.DB().Save(&refreshTokenRecord).Error; err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to update refresh token", err.Error())
+		return
+	}
+	// Set refresh token in cookies
+	c.SetCookie("GO_JWT", refreshToken, int(refreshExpiresIn), "/", "", false, true)
+
+	// Send success response with tokens
+	response.SendResponse(c, http.StatusOK, true, "Token updated successfully", gin.H{
+		"access_token": accessToken,
+	}, nil)
+
+}
