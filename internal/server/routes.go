@@ -14,12 +14,16 @@ import (
 func (s *Server) RegisterRoutes() http.Handler {
 	r := gin.Default()
 
+	// Global middleware
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173"}, // Add your frontend URL
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true, // Enable cookies/auth
 	}))
+
+	// Add database middleware
+	r.Use(middleware.DatabaseMiddleware(s.db))
 
 	r.GET("/", s.HelloWorldHandler)
 
@@ -38,13 +42,15 @@ func (s *Server) RegisterRoutes() http.Handler {
 			auth.GET("/", authHandler.HelloAuth)
 			auth.POST("/signup", middleware.ValidateRequest(&validation.SignUpRequest{}, validator.New()), authHandler.SignUp)
 			auth.PUT("/verify-email/:token", authHandler.VerifyEmail)
-			auth.POST("/signin",middleware.ValidateRequest(&validation.SignInRequest{},validator.New()), authHandler.SignIn)
+			auth.POST("/signin", middleware.ValidateRequest(&validation.SignInRequest{}, validator.New()), authHandler.SignIn)
 		}
 
 		// User routes
 		user := v1.Group("/user")
 		{
 			user.GET("/", userHandler.HelloUser)
+			// Protected profile route
+			user.GET("/profile", middleware.AuthMiddleware(), userHandler.GetProfile)
 		}
 	}
 
@@ -54,16 +60,16 @@ func (s *Server) RegisterRoutes() http.Handler {
 	return r
 }
 
+// HelloWorldHandler handles the GET request for root endpoint
 func (s *Server) HelloWorldHandler(c *gin.Context) {
-	resp := make(map[string]string)
-	resp["message"] = "Hello! Welcome to GoLang API"
-
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, gin.H{"message": "Hello World"})
 }
 
+// healthHandler handles the GET request for health endpoint
 func (s *Server) healthHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, s.db.Health())
+	c.JSON(http.StatusOK, gin.H{"status": "OK"})
 }
+
 func noRouteHandler(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"message": "Api not found!!! Wrong url, there is no route in this url."})
 }
