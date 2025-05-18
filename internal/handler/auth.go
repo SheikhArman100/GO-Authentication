@@ -411,7 +411,7 @@ func (h *AuthHandler) UserDetails(c *gin.Context) {
 	email := claims["email"].(string)
 
 	//send success response
-	response.SendResponse(c, http.StatusOK, true, "User details", gin.H{
+	response.SendResponse(c, http.StatusOK, true, "User details retrieved successfully", gin.H{
 		"user_id": userID,
 		"role":    role,
 		"email":   email,
