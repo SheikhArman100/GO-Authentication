@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
 )
 
 type UserHandler struct {
@@ -42,7 +43,9 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 
 	// Fetch user with related data
 	var user model.User
-	if err := h.db.DB().Preload("UserDetail.Image").First(&user, userID).Error; err != nil {
+	if err := h.db.DB().Preload("UserDetail").Preload("UserDetail.Image").Preload("SocialProfiles", func(db *gorm.DB) *gorm.DB {
+		return db.Omit("User") // Skip loading User in SocialProfiles since it's redundant (user data is already in the parent object)
+	}).First(&user, userID).Error; err != nil {
 		response.ApiError(c, http.StatusNotFound, "User not found")
 		return
 	}
