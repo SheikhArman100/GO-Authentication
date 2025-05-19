@@ -11,6 +11,7 @@ import (
 	"my-project/internal/database"
 	"my-project/internal/helper"
 	"my-project/internal/model"
+	"my-project/internal/oauth"
 	"my-project/internal/response"
 	"my-project/internal/validation"
 
@@ -385,11 +386,175 @@ func (h *AuthHandler) SignOut(c *gin.Context) {
 		"user_id": userID,
 	}, nil)
 }
-//user details from refresh token
+
+// GoogleSignIn initiates the Google OAuth2 flow
+func (h *AuthHandler) GoogleSignIn(c *gin.Context) {
+	// Generate random state
+	state := helper.GenerateRandomString(32)
+
+	// Store state in cookie
+	c.SetCookie("oauth_state", state, 600, "/", "", false, true)
+
+	// Get Google OAuth config
+	googleConfig := oauth.GoogleOAuthConfig()
+
+	// Redirect to Google's consent page
+	url := googleConfig.AuthCodeURL(state)
+	fmt.Println("Redirecting to Google OAuth2 consent page...",url)
+	c.Redirect(http.StatusTemporaryRedirect, url)
+}
+
+// GoogleCallback handles the callback from Google
+func (h *AuthHandler) GoogleCallback(c *gin.Context) {
+	// Get state from cookie
+	state, err := c.Cookie("oauth_state")
+	if err != nil {
+		response.ApiError(c, http.StatusBadRequest, "State cookie not found")
+		return
+	}
+
+	// Verify state
+	if state != c.Query("state") {
+		response.ApiError(c, http.StatusBadRequest, "Invalid state parameter")
+		return
+	}
+
+	// Exchange code for token
+	code := c.Query("code")
+	googleConfig := oauth.GoogleOAuthConfig()
+	token, err := googleConfig.Exchange(c, code)
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to exchange token", err.Error())
+		return
+	}
+
+	// Get user info from Google
+	googleUser, err := oauth.GetGoogleUser(token.AccessToken)
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to get user info from Google", err.Error())
+		return
+	}
+
+	// Start database transaction
+	tx := h.db.DB().Begin()
+
+	// Check if user exists
+	var user model.User
+	if err := tx.Where("email = ?", googleUser.Email).First(&user).Error; err != nil {
+		// Create new user if not exists
+		user = model.User{
+			Name:       googleUser.Name,
+			Email:      googleUser.Email,
+			IsVerified: true,
+			Role:       "user",
+		}
+		if err := tx.Create(&user).Error; err != nil {
+			tx.Rollback()
+			response.ApiError(c, http.StatusInternalServerError, "Failed to create user", err.Error())
+			return
+		}
+	}
+
+	// Create or update social profile
+	var socialProfile model.SocialProfile
+	if err := tx.Where("user_id = ? AND provider = ?", user.ID, model.Google).First(&socialProfile).Error; err != nil {
+		// Create new social profile
+		socialProfile = model.SocialProfile{
+			UserID:     user.ID,
+			Provider:   model.Google,
+			ProviderID: googleUser.ID,
+			Name:       googleUser.Name,
+			PhotoURL:   googleUser.Picture,
+		}
+		if err := tx.Create(&socialProfile).Error; err != nil {
+			tx.Rollback()
+			response.ApiError(c, http.StatusInternalServerError, "Failed to create social profile", err.Error())
+			return
+		}
+	} else {
+		// Update existing social profile
+		socialProfile.Name = googleUser.Name
+		socialProfile.PhotoURL = googleUser.Picture
+		if err := tx.Save(&socialProfile).Error; err != nil {
+			tx.Rollback()
+			response.ApiError(c, http.StatusInternalServerError, "Failed to update social profile", err.Error())
+			return
+		}
+	}
+
+	// generate new refresh token
+	refreshExpiresInStr := os.Getenv("JWT_REFRESH_TOKEN_EXPIRES_IN")
+	refreshExpiresIn, err := strconv.ParseInt(refreshExpiresInStr, 10, 64)
+	if err != nil {
+		tx.Rollback()
+		response.ApiError(c, http.StatusInternalServerError, "Invalid JWT_REFRESH_TOKEN_EXPIRES_IN value", err.Error())
+		return
+	}
+	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    user.ID,
+		"email": user.Email,
+		"role":  user.Role,
+		"exp":   time.Now().Add(time.Second * time.Duration(refreshExpiresIn)).Unix(),
+	}).SignedString([]byte(os.Getenv("JWT_REFRESH_TOKEN_SECRET")))
+	if err != nil {
+		tx.Rollback()
+		response.ApiError(c, http.StatusInternalServerError, "Failed to generate refresh token", err.Error())
+		return
+	}
+
+	// Create refresh token record
+	refreshTokenRecord := model.RefreshToken{
+		Token:     refreshToken,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(time.Second * time.Duration(refreshExpiresIn)),
+	}
+
+	// Save refresh token to database
+	if err := tx.Create(&refreshTokenRecord).Error; err != nil {
+		tx.Rollback()
+		response.ApiError(c, http.StatusInternalServerError, "Failed to save refresh token", err.Error())
+		return
+	}
+
+	// Set refresh token in cookies
+	c.SetCookie("GO_JWT", refreshToken, int(refreshExpiresIn), "/", "", false, true)
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to commit transaction", err.Error())
+		return
+	}
+
+	// Generate  access token
+	accessExpiresInStr := os.Getenv("JWT_ACCESS_TOKEN_EXPIRES_IN")
+	accessExpiresIn, err := strconv.ParseInt(accessExpiresInStr, 10, 64)
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Invalid JWT_ACCESS_TOKEN_EXPIRES_IN value", err.Error())
+		return
+	}
+
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    user.ID,
+		"email": user.Email,
+		"role":  user.Role,
+		"exp":   time.Now().Add(time.Second * time.Duration(accessExpiresIn)).Unix(),
+	}).SignedString([]byte(os.Getenv("JWT_ACCESS_TOKEN_SECRET")))
+	if err != nil {
+		response.ApiError(c, http.StatusInternalServerError, "Failed to generate access token", err.Error())
+		return
+	}
+
+	// Send success response
+	response.SendResponse(c, http.StatusOK, true, "Google sign in successful", gin.H{
+		"access_token": accessToken,
+		"user_id":      user.ID,
+	}, nil)
+}
+
+// user details from refresh token
 func (h *AuthHandler) UserDetails(c *gin.Context) {
 	// Get refresh token from cookies
 	refreshToken, err := c.Cookie("GO_JWT")
-	if err!= nil {
+	if err != nil {
 		response.ApiError(c, http.StatusUnauthorized, "Please sign in first")
 		return
 	}
@@ -400,11 +565,11 @@ func (h *AuthHandler) UserDetails(c *gin.Context) {
 		return []byte(os.Getenv("JWT_REFRESH_TOKEN_SECRET")), nil
 
 	})
-	if err!= nil ||!t.Valid {
+	if err != nil || !t.Valid {
 		response.ApiError(c, http.StatusBadRequest, "Invalid or expired refresh token")
 		return
 	}
-	
+
 	//extract user id,role,email from claims
 	userID := uint(claims["id"].(float64))
 	role := claims["role"].(string)

@@ -51,7 +51,10 @@ func (s *Server) RegisterRoutes() http.Handler {
 			//sign out route
 			auth.POST("/signout", authHandler.SignOut)
 			//user details from token
-			auth.GET("/user", authHandler.UserDetails)	
+			auth.GET("/user", authHandler.UserDetails)
+			//Google OAuth routes
+			auth.GET("/google/signin", authHandler.GoogleSignIn)
+			auth.GET("/google/callback", authHandler.GoogleCallback)	
 		}
 
 		// User routes

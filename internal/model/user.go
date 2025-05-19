@@ -9,10 +9,10 @@ import (
 // UserRole defines the role enum
 type UserRole string
 
-const (
-	RoleUser  UserRole = "user"
-	RoleAdmin UserRole = "admin"
-)
+// const (
+// 	RoleUser  UserRole = "user"
+// 	RoleAdmin UserRole = "admin"
+// )
 
 // User model
 type User struct {
