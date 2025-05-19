@@ -400,7 +400,7 @@ func (h *AuthHandler) GoogleSignIn(c *gin.Context) {
 
 	// Redirect to Google's consent page
 	url := googleConfig.AuthCodeURL(state)
-	fmt.Println("Redirecting to Google OAuth2 consent page...",url)
+	fmt.Println("Redirecting to Google OAuth2 consent page...", url)
 	c.Redirect(http.StatusTemporaryRedirect, url)
 }
 
@@ -441,10 +441,20 @@ func (h *AuthHandler) GoogleCallback(c *gin.Context) {
 	// Check if user exists
 	var user model.User
 	if err := tx.Where("email = ?", googleUser.Email).First(&user).Error; err != nil {
+		// Generate random password for new user
+		password := helper.GenerateRandomString(12)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			tx.Rollback()
+			response.ApiError(c, http.StatusInternalServerError, "Failed to hash password", err.Error())
+			return
+		}
+
 		// Create new user if not exists
 		user = model.User{
 			Name:       googleUser.Name,
 			Email:      googleUser.Email,
+			Password:   string(hashedPassword),
 			IsVerified: true,
 			Role:       "user",
 		}
@@ -452,6 +462,21 @@ func (h *AuthHandler) GoogleCallback(c *gin.Context) {
 			tx.Rollback()
 			response.ApiError(c, http.StatusInternalServerError, "Failed to create user", err.Error())
 			return
+		}
+
+		// Send password via email
+		emailBody := fmt.Sprintf(`
+			<div>
+				<p>Hi, %s</p>
+				<p>Welcome to E-Commerce! Your account has been created with Google Sign-In.</p>
+				<p>Your temporary password is: <strong>%s</strong></p>
+				<p>Please change your password after signing in for security.</p>
+				<p>Thank you, <br> E-Commerce</p>
+			</div>`,
+			user.Name, password)
+
+		if err := helper.SendEmail(user.Email, emailBody, "Your E-Commerce Account Password"); err != nil {
+			log.Print("Failed to send password email", err.Error())
 		}
 	}
 
